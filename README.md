@@ -28,13 +28,15 @@ It recognises buys in shell commands the way trading skills run them (`--token-o
 
 No setup is needed for a few checks a day: the guard uses true402's free daily allowance.
 
-For more, give it a **separate, low-balance** Base wallet holding a little USDC (gas is sponsored):
+For more, give it a **dedicated, low-balance** Base wallet holding a little USDC (gas is sponsored):
 
 ```bash
-export TRUE402_PAYER_PRIVATE_KEY=0x…   # or PAYER_PRIVATE_KEY
+export TRUE402_PAYER_PRIVATE_KEY=0x…
 ```
 
-Each check then pays the exact quoted price over [x402](https://x402.org) — no account, no API key. The key is read from the environment, never from OpenClaw's config file, and is never sent anywhere: it signs a USDC authorization locally. The guard **refuses to sign more than $0.25** for a single check.
+Only this dedicated variable is read — never a generic `PAYER_PRIVATE_KEY` another tool may have set. Each check then pays the exact quoted price over [x402](https://x402.org), no account and no API key. The key stays on your machine (it authorizes each USDC payment locally) and is never written to OpenClaw's config.
+
+Spending is bounded twice: **at most $0.02 per check** (`maxAmountUsd`) and **at most 50 paid checks a day** (`maxPaidChecksPerDay`) — so never more than $1.00 a day by default. Past the daily limit, only free checks run, and the guard logs a warning.
 
 ## Settings
 
@@ -47,7 +49,8 @@ All optional, under the plugin's config (`true402-swap-guard`):
 | `onUnchecked` | `allow` | `ask` or `block` when a token could not be checked |
 | `allowTokens` | `[]` | Token addresses never checked |
 | `timeoutMs` | `15000` | Give up on a free check after this long (then it is "unchecked"). A paid check is never abandoned once paid — you get the answer you paid for |
-| `maxAmountUsd` | `0.25` | Never sign a single check payment above this |
+| `maxAmountUsd` | `0.02` | Never pay more than this for one check |
+| `maxPaidChecksPerDay` | `50` | Paid checks per UTC day; after that only free checks run |
 
 ## What is sent
 
