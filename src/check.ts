@@ -5,6 +5,9 @@
 // → risk critical | high | medium | low. Without a payer key the call is a plain request, served by
 // true402's small daily free allowance; with one, payStall pays the exact quoted price over x402
 // (USDC on Base, never above the maxAmountUsd cap) whenever the free allowance is used up.
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { homedir } from 'node:os';
+import { dirname, join } from 'node:path';
 import { payStall } from './x402.js';
 import { CLIENT } from './client.js';
 import { clean, type Checker, type Verdict } from './guard.js';
@@ -23,6 +26,38 @@ export interface CheckConfig {
   maxPaidChecksPerDay?: number;
   /** Clock, for tests. */
   now?: () => number;
+  /** Where the daily paid-check count lives. Default: a file in OpenClaw's state directory. */
+  spendStore?: SpendStore;
+}
+
+/** The day's paid-check count, kept OUTSIDE the process so a restart does not reset the limit. */
+export interface SpendStore {
+  read(): { day: string; count: number };
+  write(v: { day: string; count: number }): void;
+}
+
+/** `$OPENCLAW_STATE_DIR` (or ~/.openclaw)/true402-swap-guard/spend.json. Unreadable = a fresh day. */
+export function fileSpendStore(path = join(process.env.OPENCLAW_STATE_DIR || join(homedir(), '.openclaw'), 'true402-swap-guard', 'spend.json')): SpendStore {
+  return {
+    read() {
+      try {
+        const v = JSON.parse(readFileSync(path, 'utf8')) as { day?: unknown; count?: unknown };
+        return { day: typeof v.day === 'string' ? v.day : '', count: typeof v.count === 'number' && v.count >= 0 ? v.count : 0 };
+      } catch {
+        return { day: '', count: 0 };
+      }
+    },
+    write(v) {
+      mkdirSync(dirname(path), { recursive: true });
+      writeFileSync(path, JSON.stringify(v), { mode: 0o600 });
+    },
+  };
+}
+
+/** In-memory store, for tests. */
+export function memorySpendStore(): SpendStore {
+  let v = { day: '', count: 0 };
+  return { read: () => v, write: (n) => { v = n; } };
 }
 
 /** Default per-check ceiling and daily count: together never more than $1.00 a day. */
@@ -84,9 +119,9 @@ export function createChecker(cfg: CheckConfig = {}): Checker {
   const perDay = cfg.maxPaidChecksPerDay ?? DEFAULT_MAX_PAID_CHECKS_PER_DAY;
   const now = cfg.now ?? Date.now;
   // An OVERALL spending limit, not only a per-payment one (ClawHub scan, 2026-10-20): counted per UTC
-  // day, in this process. Counted BEFORE paying, so a failed or abandoned payment still counts.
-  let day = '';
-  let paidToday = 0;
+  // day in a file, so restarting OpenClaw does not reset it. Counted BEFORE paying, so a failed
+  // payment still counts. If the count cannot be SAVED, no payment is made (fail closed).
+  const store = cfg.spendStore ?? fileSpendStore();
 
   /** The free request, under the guard's own deadline. Returns null on a 402 (payment needed). */
   async function free(path: string, token: string): Promise<unknown | null> {
@@ -112,9 +147,14 @@ export function createChecker(cfg: CheckConfig = {}): Checker {
     if (body !== null) return toVerdict(body);
     if (!cfg.payerPrivateKey) throw new Error('the free daily checks are used up — set TRUE402_PAYER_PRIVATE_KEY to pay per check');
     const today = new Date(now()).toISOString().slice(0, 10);
-    if (today !== day) [day, paidToday] = [today, 0];
+    const saved = store.read();
+    const paidToday = saved.day === today ? saved.count : 0;
     if (paidToday >= perDay) throw new Error(`the daily limit of ${perDay} paid checks is reached (maxPaidChecksPerDay)`);
-    paidToday++;
+    try {
+      store.write({ day: today, count: paidToday + 1 });
+    } catch {
+      throw new Error('could not record the paid-check count, so no payment was made');
+    }
     return toVerdict(await payStall(path, { token: t.token }, { payerPrivateKey: cfg.payerPrivateKey, baseUrl, maxAmountUsd: perCheck }));
   };
 }

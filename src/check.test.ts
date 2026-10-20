@@ -1,5 +1,8 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { createChecker, evmVerdict, solanaVerdict } from './check';
+import { mkdtempSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { createChecker, evmVerdict, solanaVerdict, fileSpendStore, memorySpendStore } from './check';
 
 const ADDR = '0x1111111111111111111111111111111111111111';
 
@@ -84,10 +87,30 @@ describe('createChecker: an overall spending limit (ClawHub scan, 2026-10-20)', 
     let t = Date.parse('2026-10-20T10:00:00Z');
     // payStall is never reached with this key once the limit is hit; before that it fails on the stub's
     // empty 402 — either way the limit decides whether a payment is even attempted.
-    const check = createChecker({ payerPrivateKey: '0x' + '11'.repeat(32), maxPaidChecksPerDay: 2, now: () => t });
+    const check = createChecker({ payerPrivateKey: '0x' + '11'.repeat(32), maxPaidChecksPerDay: 2, now: () => t, spendStore: memorySpendStore() });
     for (let i = 0; i < 2; i++) await expect(check({ chain: 'base', token: ADDR })).rejects.not.toThrow(/daily limit/);
     await expect(check({ chain: 'base', token: ADDR })).rejects.toThrow(/daily limit of 2 paid checks/);
     t = Date.parse('2026-10-21T00:00:01Z');
     await expect(check({ chain: 'base', token: ADDR })).rejects.not.toThrow(/daily limit/);
+  });
+});
+
+describe('the daily limit survives a restart (ClawHub scan of 1.0.2)', () => {
+  afterEach(() => vi.unstubAllGlobals());
+  it('a new checker on the same file sees the count already spent today', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('{}', { status: 402 })));
+    const path = join(mkdtempSync(join(tmpdir(), 'guard-')), 'spend.json');
+    const t = Date.parse('2026-10-20T10:00:00Z');
+    const key = '0x' + '11'.repeat(32);
+    const first = createChecker({ payerPrivateKey: key, maxPaidChecksPerDay: 1, now: () => t, spendStore: fileSpendStore(path) });
+    await expect(first({ chain: 'base', token: ADDR })).rejects.not.toThrow(/daily limit/);
+    const afterRestart = createChecker({ payerPrivateKey: key, maxPaidChecksPerDay: 1, now: () => t, spendStore: fileSpendStore(path) });
+    await expect(afterRestart({ chain: 'base', token: ADDR })).rejects.toThrow(/daily limit of 1 paid checks/);
+  });
+
+  it('if the count cannot be saved, no payment is made', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('{}', { status: 402 })));
+    const broken = { read: () => ({ day: '', count: 0 }), write: () => { throw new Error('read-only disk'); } };
+    await expect(createChecker({ payerPrivateKey: '0x' + '11'.repeat(32), spendStore: broken })({ chain: 'base', token: ADDR })).rejects.toThrow(/no payment was made/);
   });
 });
