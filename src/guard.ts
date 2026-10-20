@@ -162,6 +162,6 @@ function reasonText(v: Verdict): string {
 /** Server and error text goes in front of a model and a user: no control characters, bounded length. */
 export function clean(s: string, max = 160): string {
   // eslint-disable-next-line no-control-regex
-  const t = s.replace(/[\u0000-\u001f\u007f-\u009f​-‏‪-‮⁦-⁩]/g, ' ').replace(/\s+/g, ' ').trim();
+  const t = s.replace(/[\u0000-\u001f\u007f-\u009f\u200b-\u200f\u202a-\u202e\u2066-\u2069]/g, ' ').replace(/\s+/g, ' ').trim();
   return t.length > max ? `${t.slice(0, max - 1)}…` : t;
 }

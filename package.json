@@ -1,6 +1,6 @@
 {
   "name": "@true402.dev/openclaw-swap-guard",
-  "version": "1.0.4",
+  "version": "1.0.5",
   "description": "OpenClaw plugin: before any tool call that buys a token, check it with true402 (executed buy/sell honeypot simulation) and block honeypots and rugs. Base, Ethereum, BSC, Solana. Free daily checks; pay-per-check over x402.",
   "type": "module",
   "main": "dist/index.js",

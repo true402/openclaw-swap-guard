@@ -145,7 +145,7 @@ describe('createGuard: strictest outcome wins (commit review, 2026-10-20)', () =
 
 describe('clean', () => {
   it('strips control and bidi characters and bounds the length', () => {
-    expect(clean('a\u001b[31mb‮c\n d')).toBe('a [31mb c d');
+    expect(clean('a\u001b[31mb\u202ec\n d')).toBe('a [31mb c d');
     expect(clean('x'.repeat(500)).length).toBe(160);
   });
 });

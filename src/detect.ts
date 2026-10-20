@@ -116,11 +116,6 @@ export function detectTrade(toolName: string, params: Record<string, unknown>, d
 }
 
 /**
- * Each shell segment (split at ; && || | newlines and command substitution) is read on its own, so
- * `--token-out <USDC>; buy <scam>` cannot hide the second buy behind the first, and a chain flag only
- * applies to the segment it is in. Known limit: a token passed through a shell variable is not seen.
- */
-/**
  * Fail-closed by construction. Commit review found six ways in a row to make a hand-rolled shell
  * parser misread a command (quotes, comments, `$'…'`, operators inside quotes), so nothing here relies
  * on parsing shell correctly. A misreading can only ADD checks, never remove one:
