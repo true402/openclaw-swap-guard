@@ -1,0 +1,21 @@
+{
+  "id": "true402-swap-guard",
+  "name": "true402 swap guard",
+  "description": "Blocks token buys when true402 finds a honeypot or a rug in progress (Base, Ethereum, BSC, Solana).",
+  "categories": ["security"],
+  "activation": {
+    "onStartup": true
+  },
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "defaultChain": { "type": "string", "enum": ["base", "ethereum", "bsc"], "description": "Chain assumed for a 0x address when the trade names none. Default base." },
+      "onCaution": { "type": "string", "enum": ["allow", "ask"], "description": "On a 'caution' verdict: let the trade through (default) or ask you first." },
+      "onUnchecked": { "type": "string", "enum": ["allow", "ask", "block"], "description": "When a token could not be checked (API unreachable, free checks used up): allow (default), ask, or block." },
+      "allowTokens": { "type": "array", "items": { "type": "string" }, "description": "Token addresses never checked." },
+      "timeoutMs": { "type": "number", "description": "Give up on one check after this many ms (default 15000)." },
+      "maxAmountUsd": { "type": "number", "description": "Never sign a single check payment above this, in USDC (default 0.25)." }
+    }
+  }
+}

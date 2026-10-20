@@ -1,0 +1,73 @@
+{
+  "name": "@true402.dev/openclaw-swap-guard",
+  "version": "1.0.0",
+  "description": "OpenClaw plugin: before any tool call that buys a token, check it with true402 (executed buy/sell honeypot simulation) and block honeypots and rugs. Base, Ethereum, BSC, Solana. Free daily checks; pay-per-check over x402.",
+  "type": "module",
+  "main": "dist/index.js",
+  "files": [
+    "dist",
+    "openclaw.plugin.json"
+  ],
+  "scripts": {
+    "build": "tsup src/index.ts --format esm --clean --external openclaw",
+    "test": "vitest run",
+    "prepublishOnly": "npm run build"
+  },
+  "keywords": [
+    "openclaw",
+    "openclaw-plugin",
+    "x402",
+    "honeypot",
+    "rug-check",
+    "token-safety",
+    "swap",
+    "trading-agent",
+    "base",
+    "solana",
+    "ai-agents"
+  ],
+  "homepage": "https://true402.dev",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/true402/openclaw-swap-guard"
+  },
+  "license": "MIT",
+  "dependencies": {
+    "viem": "^2.21.0"
+  },
+  "peerDependencies": {
+    "openclaw": ">=2026.10.5"
+  },
+  "peerDependenciesMeta": {
+    "openclaw": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "tsup": "^8.0.0",
+    "typescript": "^5.4.0"
+  },
+  "openclaw": {
+    "extensions": [
+      "./dist/index.js"
+    ],
+    "install": {
+      "clawhubSpec": "clawhub:@true402.dev/openclaw-swap-guard",
+      "npmSpec": "@true402.dev/openclaw-swap-guard",
+      "defaultChoice": "npm",
+      "minHostVersion": ">=2026.10.5"
+    },
+    "compat": {
+      "pluginApi": ">=2026.10.5"
+    },
+    "build": {
+      "openclawVersion": "2026.10.5"
+    }
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "allowScripts": {
+    "esbuild": true
+  }
+}
