@@ -15,7 +15,8 @@
       "onUnchecked": { "type": "string", "enum": ["allow", "ask", "block"], "description": "When a token could not be checked (API unreachable, free checks used up): allow (default), ask, or block." },
       "allowTokens": { "type": "array", "items": { "type": "string" }, "description": "Token addresses never checked." },
       "timeoutMs": { "type": "number", "description": "Give up on one check after this many ms (default 15000)." },
-      "maxAmountUsd": { "type": "number", "description": "Never sign a single check payment above this, in USDC (default 0.25)." }
+      "maxAmountUsd": { "type": "number", "description": "Never pay more than this for one check, in USDC (default 0.02)." },
+      "maxPaidChecksPerDay": { "type": "number", "description": "At most this many paid checks per day; beyond it only free checks run (default 50)." }
     }
   }
 }

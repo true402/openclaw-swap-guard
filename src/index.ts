@@ -24,6 +24,7 @@ export function readConfig(raw: unknown): Config {
     allowTokens: Array.isArray(c.allowTokens) ? c.allowTokens.filter((x): x is string => typeof x === 'string') : undefined,
     timeoutMs: num(c.timeoutMs),
     maxAmountUsd: num(c.maxAmountUsd),
+    maxPaidChecksPerDay: num(c.maxPaidChecksPerDay),
   };
 }
 
@@ -33,9 +34,10 @@ export default definePluginEntry({
   description: 'Blocks token buys when true402 finds a honeypot or a rug in progress (Base, Ethereum, BSC, Solana).',
   register(api) {
     const cfg = readConfig(api.pluginConfig);
-    // The key is read from the environment, never from plugin config, so it is not written to
-    // OpenClaw's config file. Optional: without it the guard uses true402's free daily checks.
-    const payerPrivateKey = process.env.TRUE402_PAYER_PRIVATE_KEY || process.env.PAYER_PRIVATE_KEY || undefined;
+    // A DEDICATED variable, read from the environment (never from plugin config, so it is not written
+    // to OpenClaw's config file). Deliberately not the generic PAYER_PRIVATE_KEY: the guard must never
+    // spend from a wallet key set for some other tool. Optional: without it only free checks run.
+    const payerPrivateKey = process.env.TRUE402_PAYER_PRIVATE_KEY || undefined;
     const warn = (m: string) => (api.logger?.warn ? api.logger.warn(m) : console.warn(m));
     const guard = createGuard(createChecker({ ...cfg, payerPrivateKey }), { ...cfg, warn });
     api.on('before_tool_call', (event, ctx) => guard(event.toolName, event.params ?? {}, ctx?.abortSignal), { priority: 60 });

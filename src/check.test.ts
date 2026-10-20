@@ -76,3 +76,18 @@ describe('createChecker without a payer key (free checks)', () => {
     await expect(createChecker({ timeoutMs: 20 })({ chain: 'base', token: ADDR })).rejects.toThrow();
   });
 });
+
+describe('createChecker: an overall spending limit (ClawHub scan, 2026-10-20)', () => {
+  afterEach(() => vi.unstubAllGlobals());
+  it('stops paying after maxPaidChecksPerDay, and starts again the next UTC day', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('{}', { status: 402 })));
+    let t = Date.parse('2026-10-20T10:00:00Z');
+    // payStall is never reached with this key once the limit is hit; before that it fails on the stub's
+    // empty 402 — either way the limit decides whether a payment is even attempted.
+    const check = createChecker({ payerPrivateKey: '0x' + '11'.repeat(32), maxPaidChecksPerDay: 2, now: () => t });
+    for (let i = 0; i < 2; i++) await expect(check({ chain: 'base', token: ADDR })).rejects.not.toThrow(/daily limit/);
+    await expect(check({ chain: 'base', token: ADDR })).rejects.toThrow(/daily limit of 2 paid checks/);
+    t = Date.parse('2026-10-21T00:00:01Z');
+    await expect(check({ chain: 'base', token: ADDR })).rejects.not.toThrow(/daily limit/);
+  });
+});

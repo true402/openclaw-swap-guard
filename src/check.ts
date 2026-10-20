@@ -17,9 +17,17 @@ export interface CheckConfig {
   baseUrl?: string;
   /** Give up after this many ms and treat the token as unchecked. Default 15000. */
   timeoutMs?: number;
-  /** Never sign a single payment above this, in USDC. Default 0.25. */
+  /** Never pay more than this for one check, in USDC. Default 0.02 (checks cost $0.005–0.008). */
   maxAmountUsd?: number;
+  /** At most this many PAID checks per UTC day; beyond it only free checks run. Default 50. */
+  maxPaidChecksPerDay?: number;
+  /** Clock, for tests. */
+  now?: () => number;
 }
+
+/** Default per-check ceiling and daily count: together never more than $1.00 a day. */
+export const DEFAULT_MAX_PER_CHECK_USD = 0.02;
+export const DEFAULT_MAX_PAID_CHECKS_PER_DAY = 50;
 
 interface EvmReport {
   verdict?: { rating?: string; reasons?: unknown };
@@ -72,6 +80,13 @@ function strings(v: unknown): string[] {
 export function createChecker(cfg: CheckConfig = {}): Checker {
   const baseUrl = cfg.baseUrl ?? 'https://true402.dev/api';
   const timeoutMs = cfg.timeoutMs ?? 15_000;
+  const perCheck = cfg.maxAmountUsd ?? DEFAULT_MAX_PER_CHECK_USD;
+  const perDay = cfg.maxPaidChecksPerDay ?? DEFAULT_MAX_PAID_CHECKS_PER_DAY;
+  const now = cfg.now ?? Date.now;
+  // An OVERALL spending limit, not only a per-payment one (ClawHub scan, 2026-10-20): counted per UTC
+  // day, in this process. Counted BEFORE paying, so a failed or abandoned payment still counts.
+  let day = '';
+  let paidToday = 0;
 
   /** The free request, under the guard's own deadline. Returns null on a 402 (payment needed). */
   async function free(path: string, token: string): Promise<unknown | null> {
@@ -95,7 +110,11 @@ export function createChecker(cfg: CheckConfig = {}): Checker {
     // (ClawHub scan, 2026-10-20). payStall bounds it by itself (30 s probe, 120 s paid leg).
     const body = await free(path, t.token);
     if (body !== null) return toVerdict(body);
-    if (!cfg.payerPrivateKey) throw new Error('the free daily checks are used up — set PAYER_PRIVATE_KEY to pay per check');
-    return toVerdict(await payStall(path, { token: t.token }, { payerPrivateKey: cfg.payerPrivateKey, baseUrl, maxAmountUsd: cfg.maxAmountUsd }));
+    if (!cfg.payerPrivateKey) throw new Error('the free daily checks are used up — set TRUE402_PAYER_PRIVATE_KEY to pay per check');
+    const today = new Date(now()).toISOString().slice(0, 10);
+    if (today !== day) [day, paidToday] = [today, 0];
+    if (paidToday >= perDay) throw new Error(`the daily limit of ${perDay} paid checks is reached (maxPaidChecksPerDay)`);
+    paidToday++;
+    return toVerdict(await payStall(path, { token: t.token }, { payerPrivateKey: cfg.payerPrivateKey, baseUrl, maxAmountUsd: perCheck }));
   };
 }
