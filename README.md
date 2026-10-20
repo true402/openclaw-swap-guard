@@ -36,7 +36,7 @@ export TRUE402_PAYER_PRIVATE_KEY=0x…
 
 Only this dedicated variable is read — never a generic `PAYER_PRIVATE_KEY` another tool may have set. Each check then pays the exact quoted price over [x402](https://x402.org), no account and no API key. The key stays on your machine (it authorizes each USDC payment locally) and is never written to OpenClaw's config.
 
-Spending is bounded twice: **at most $0.02 per check** (`maxAmountUsd`) and **at most 50 paid checks a day** (`maxPaidChecksPerDay`) — so never more than $1.00 a day by default. Past the daily limit, only free checks run, and the guard logs a warning.
+Spending is bounded twice: **at most $0.02 per check** (`maxAmountUsd`) and **at most 50 paid checks per UTC day** (`maxPaidChecksPerDay`) — at most $1.00 a day by default. The day's count is kept in `$OPENCLAW_STATE_DIR/true402-swap-guard/spend.json` (default `~/.openclaw/…`), so restarting OpenClaw does not reset it; if that file cannot be written, no payment is made. Past the limit only free checks run, and the guard logs a warning. The limit is per machine: several OpenClaw installs with their own state directories each have their own.
 
 ## Settings
 
@@ -54,7 +54,9 @@ All optional, under the plugin's config (`true402-swap-guard`):
 
 ## What is sent
 
-Only the token address and its chain, to `true402.dev`. Nothing about your wallet, your prompts or the trade itself.
+A **free check** sends only the token address and its chain to `true402.dev` — nothing about your wallet, your prompts or the trade.
+
+A **paid check** also sends a signed USDC payment authorization. That necessarily reveals the paying wallet's **address** to true402, and the payment is settled on Base, where it is public. That is why the wallet should be a dedicated, low-balance one. The private key itself never leaves your machine.
 
 ## License
 
