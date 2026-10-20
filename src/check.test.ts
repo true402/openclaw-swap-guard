@@ -71,7 +71,8 @@ describe('createChecker without a payer key (free checks)', () => {
   });
 
   it('gives up at the deadline', async () => {
-    vi.stubGlobal('fetch', vi.fn(() => new Promise(() => {})));
-    await expect(createChecker({ timeoutMs: 20 })({ chain: 'base', token: ADDR })).rejects.toThrow(/20 ms/);
+    // Like the real fetch: hangs until its AbortSignal fires.
+    vi.stubGlobal('fetch', vi.fn((_u: string, init: RequestInit) => new Promise((_r, reject) => init.signal?.addEventListener('abort', () => reject(init.signal?.reason)))));
+    await expect(createChecker({ timeoutMs: 20 })({ chain: 'base', token: ADDR })).rejects.toThrow();
   });
 });

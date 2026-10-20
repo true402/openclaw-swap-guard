@@ -111,6 +111,38 @@ describe('createGuard: unchecked trades are not silent', () => {
   });
 });
 
+describe('createGuard: a token that may be SOLD is asked about, never blocked (ClawHub scan)', () => {
+  it('danger on a sell-side token asks with a critical warning; a clear buy still blocks', async () => {
+    const guard = createGuard(async () => v('danger', ['liquidity pulled']));
+    const sell = await guard('exec', { command: `bot swap --token-in ${ADDR} --token-out 0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913 "` });
+    expect(sell?.block).toBeUndefined();
+    expect(sell?.requireApproval?.severity).toBe('critical');
+    expect((await guard('exec', buy))?.block).toBe(true);
+  });
+});
+
+describe('createGuard: strictest outcome wins (commit review, 2026-10-20)', () => {
+  const SCAM = '0x5555555555555555555555555555555555555555';
+  it('a comment naming the token as sold cannot turn a clear buy flag into a question', async () => {
+    const r = await createGuard(async () => v('danger', ['honeypot']))('exec', { command: `bot buy --token-out ${SCAM} # --token-in ${SCAM}` });
+    expect(r?.block).toBe(true);
+  });
+  it('an unchecked token under onUnchecked=block beats the sold-danger question', async () => {
+    const other = '0x6666666666666666666666666666666666666666';
+    const check = async (t: { token: string }) => (t.token === other ? Promise.reject(new Error('fetch failed')) : v('danger', ['rug']));
+    const r = await createGuard(check, { onUnchecked: 'block' })('exec', { command: `bot swap --token-in ${SCAM} "x ${other}` });
+    expect(r?.block).toBe(true);
+  });
+  it('one question lists every reason a human is needed', async () => {
+    const other = '0x6666666666666666666666666666666666666666';
+    const check = async (t: { token: string }) => (t.token === other ? v('caution', ['young']) : v('danger', ['rug']));
+    const r = await createGuard(check, { onCaution: 'ask' })('exec', { command: `bot swap --token-in ${SCAM} "x ${other}` });
+    expect(r?.requireApproval?.severity).toBe('critical');
+    expect(r?.requireApproval?.description).toContain('rug');
+    expect(r?.requireApproval?.description).toContain('young');
+  });
+});
+
 describe('clean', () => {
   it('strips control and bidi characters and bounds the length', () => {
     expect(clean('a\u001b[31mb‮c\n d')).toBe('a [31mb c d');

@@ -115,7 +115,10 @@ export function createGuard(check: Checker, cfg: GuardConfig = {}, now: () => nu
         return { t: ts[0], v: { level: 'unchecked', reasons: [...new Set(vs.flatMap((x) => x.reasons))] } as Verdict };
       }),
     );
-    const danger = results.find((r) => r.v.level === 'danger');
+    // The STRICTEST outcome across every token wins, in this order: block (a clear buy of a danger
+    // token, or anything unchecked under onUnchecked=block) > ask (a danger token the call may be
+    // selling, caution under onCaution=ask, unchecked under onUnchecked=ask) > allow.
+    const danger = results.find((r) => r.v.level === 'danger' && !r.t.maybeSold);
     if (danger) {
       return {
         block: true,
@@ -125,24 +128,28 @@ export function createGuard(check: Checker, cfg: GuardConfig = {}, now: () => nu
           `the plugin's allowTokens setting.`,
       };
     }
-
-    const caution = results.find((r) => r.v.level === 'caution');
-    if (caution && cfg.onCaution === 'ask') {
-      return {
-        requireApproval: {
-          title: 'Risky token — confirm the trade',
-          description: `true402 rated ${caution.t.token} on ${caution.t.chain} "caution"${reasonText(caution.v)}.`,
-          severity: 'warning',
-        },
-      };
-    }
-
     const unchecked = results.find((r) => r.v.level === 'unchecked');
     if (unchecked) warnOnce(unchecked.v.reasons[0] ?? 'unknown');
-    if (unchecked && cfg.onUnchecked && cfg.onUnchecked !== 'allow') {
-      const why = `true402 could not check ${unchecked.t.token} on ${unchecked.t.chain}${reasonText(unchecked.v)}.`;
-      if (cfg.onUnchecked === 'block') return { block: true, blockReason: `true402 swap guard blocked this trade: ${why}` };
-      return { requireApproval: { title: 'Unchecked token — confirm the trade', description: why, severity: 'info' } };
+    const uncheckedWhy = unchecked && `true402 could not check ${unchecked.t.token} on ${unchecked.t.chain}${reasonText(unchecked.v)}.`;
+    if (unchecked && cfg.onUnchecked === 'block') return { block: true, blockReason: `true402 swap guard blocked this trade: ${uncheckedWhy}` };
+
+    // Everything that needs a human, in one question.
+    const asks: string[] = [];
+    let severity: 'info' | 'warning' | 'critical' = 'info';
+    const dangerSold = results.find((r) => r.v.level === 'danger' && r.t.maybeSold);
+    if (dangerSold) {
+      asks.push(`true402 rated ${dangerSold.t.token} on ${dangerSold.t.chain} dangerous${reasonText(dangerSold.v)}. If you are selling it, approve; if this buys it, deny.`);
+      severity = 'critical';
+    }
+    const caution = results.find((r) => r.v.level === 'caution');
+    if (caution && cfg.onCaution === 'ask') {
+      asks.push(`true402 rated ${caution.t.token} on ${caution.t.chain} "caution"${reasonText(caution.v)}.`);
+      if (severity !== 'critical') severity = 'warning';
+    }
+    if (unchecked && cfg.onUnchecked === 'ask') asks.push(uncheckedWhy as string);
+    if (asks.length) {
+      const title = dangerSold ? 'Dangerous token — confirm the trade' : caution && cfg.onCaution === 'ask' ? 'Risky token — confirm the trade' : 'Unchecked token — confirm the trade';
+      return { requireApproval: { title, description: asks.join(' '), severity } };
     }
     return undefined;
   };

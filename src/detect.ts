@@ -10,6 +10,9 @@ export interface TradeTarget {
   /** 'unsupported' = the call names a chain true402 does not serve: reported, never guessed. */
   chain: Chain | 'unsupported';
   token: string;
+  /** The command also names this token on the SELL side. A danger verdict then asks, never blocks:
+   *  blocking the exit from a rug would trap its holder (ClawHub scan, 2026-10-20). */
+  maybeSold?: boolean;
 }
 
 const EVM_ADDRESS = /0x[a-fA-F0-9]{40}\b/g;
@@ -141,6 +144,12 @@ function fromCommand(cmd: string, defaultChain: Exclude<Chain, 'solana'>): Trade
 
   const unambiguous = !/#|\$'/.test(cmd) && (cmd.match(/"/g) ?? []).length % 2 === 0 && (cmd.match(/'/g) ?? []).length % 2 === 0;
   const sold = new Map<string, number>();
+  // Any sell-side mention at all, ambiguous command or not: such a token is never BLOCKED, only asked about.
+  const soldAny = new Set(flags(cmd, IN_FLAGS).map((v) => v.toLowerCase()));
+  for (const seg of cmd.split(/;|&&?|\|\|?|\n/)) {
+    const p = /\bawal\b/.test(seg) ? seg.match(/\btrade\s+(\S+)\s+(\S+)\s+(\S+)/) : null;
+    if (p) soldAny.add(p[2].replace(/['"]/g, '').toLowerCase());
+  }
   if (unambiguous) {
     const markSold = (v: string) => sold.set(v.toLowerCase(), (sold.get(v.toLowerCase()) ?? 0) + 1);
     for (const v of flags(cmd, IN_FLAGS)) markSold(v);
@@ -154,17 +163,23 @@ function fromCommand(cmd: string, defaultChain: Exclude<Chain, 'solana'>): Trade
   const keep = (v: string) => !skip(v) && (sold.get(v.toLowerCase()) ?? 0) < mentions(v);
 
   const out: TradeTarget[] = [];
+  // `maybeSold` (danger then ASKS instead of blocking) only where the command really is unclear: an
+  // ambiguous command that names the token on the sell side and NO buy flag names it. In a clear
+  // command a token that is also bought is a buy (blocked on danger), and one only sold is not checked.
+  const boughtByFlag = new Set(flags(cmd, OUT_FLAGS).map((v) => v.toLowerCase()));
+  const maybeSold = (tok: string) => !unambiguous && soldAny.has(tok.toLowerCase()) && !boughtByFlag.has(tok.toLowerCase());
+  const push = (t: TradeTarget) => out.push(maybeSold(t.token) ? { ...t, maybeSold: true } : t);
   const evm = [...new Set([...cmd.matchAll(EVM_ADDRESS)].map((m) => m[0]))].filter(keep);
   // Every EVM address that is not a major or the token being sold. A recipient wallet that slips in
   // comes back "not a token", which the guard lets through.
-  for (const chain of evmChains) for (const a of evm) out.push({ chain, token: a });
-  if (unsupportedNamed) for (const a of evm) out.push({ chain: 'unsupported', token: a });
+  for (const chain of evmChains) for (const a of evm) push({ chain, token: a });
+  if (unsupportedNamed) for (const a of evm) push({ chain: 'unsupported', token: a });
 
   const words = [...new Set(cmd.split(/[\s;|&`()]+/).map((x) => x.replace(/^[^=]*=/, '').replace(/['"]/g, '')))];
   if (supported.has('solana')) {
-    for (const w of words) if (SOLANA_MINT.test(w) && keep(w)) out.push({ chain: 'solana', token: w });
+    for (const w of words) if (SOLANA_MINT.test(w) && keep(w)) push({ chain: 'solana', token: w });
   } else if (!supported.size) {
-    for (const v of flags(cmd, OUT_FLAGS)) if (SOLANA_MINT.test(v) && !isEvm(v) && keep(v)) out.push({ chain: 'solana', token: v });
+    for (const v of flags(cmd, OUT_FLAGS)) if (SOLANA_MINT.test(v) && !isEvm(v) && keep(v)) push({ chain: 'solana', token: v });
   }
   return out;
 }

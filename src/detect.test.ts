@@ -102,10 +102,12 @@ describe('evasion attempts (commit security review, 2026-10-19)', () => {
   });
 
   it('a shell comment cannot mark the bought token as sold', () => {
-    expect(detectTrade('exec', { command: `bot buy ${SCAM} # --token-in ${SCAM}` })).toEqual([{ chain: 'base', token: SCAM }]);
+    // Still checked (a danger verdict then ASKS rather than blocks, since it is named on the sell side).
+    expect(detectTrade('exec', { command: `bot buy ${SCAM} # --token-in ${SCAM}` })).toEqual([{ chain: 'base', token: SCAM, maybeSold: true }]);
   });
 
   it('a token named on both sides is still checked; the positional rule is awal-only', () => {
+    // Clear command, bought by a flag: a buy (danger blocks), not a possible sale.
     expect(detectTrade('exec', { command: `bot swap --token-in ${SCAM} --token-out ${SCAM}` })).toEqual([{ chain: 'base', token: SCAM }]);
     expect(detectTrade('exec', { command: `othertool trade 1 ${SCAM} usdc` })).toEqual([{ chain: 'base', token: SCAM }]);
   });
@@ -134,8 +136,8 @@ describe('evasion attempts (commit security review, 2026-10-19)', () => {
   });
 
   it('ambiguous shell ($\'…\', #, unbalanced quotes) removes the sold-token exemption, never adds a skip', () => {
-    expect(detectTrade('exec', { command: `bot buy ${SCAM} $'\\'' # --chain arbitrum --token-in ${SCAM}` })).toContainEqual({ chain: 'base', token: SCAM });
-    expect(detectTrade('exec', { command: `bot swap --token-in ${SCAM} --token-out ${USDC_BASE} "` })).toEqual([{ chain: 'base', token: SCAM }]);
+    expect(detectTrade('exec', { command: `bot buy ${SCAM} $'\\'' # --chain arbitrum --token-in ${SCAM}` })).toContainEqual({ chain: 'base', token: SCAM, maybeSold: true });
+    expect(detectTrade('exec', { command: `bot swap --token-in ${SCAM} --token-out ${USDC_BASE} "` })).toEqual([{ chain: 'base', token: SCAM, maybeSold: true }]);
   });
 
   it('an operator inside quotes cannot split a buy away from its trade verb', () => {

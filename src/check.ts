@@ -73,10 +73,8 @@ export function createChecker(cfg: CheckConfig = {}): Checker {
   const baseUrl = cfg.baseUrl ?? 'https://true402.dev/api';
   const timeoutMs = cfg.timeoutMs ?? 15_000;
 
-  async function ask(path: string, token: string): Promise<unknown> {
-    if (cfg.payerPrivateKey) {
-      return payStall(path, { token }, { payerPrivateKey: cfg.payerPrivateKey, baseUrl, maxAmountUsd: cfg.maxAmountUsd });
-    }
+  /** The free request, under the guard's own deadline. Returns null on a 402 (payment needed). */
+  async function free(path: string, token: string): Promise<unknown | null> {
     const res = await fetch(`${baseUrl}${path}`, {
       method: 'POST',
       headers: { 'content-type': 'application/json', 'user-agent': `true402-${CLIENT.id}/${CLIENT.version} (+https://true402.dev)` },
@@ -84,22 +82,20 @@ export function createChecker(cfg: CheckConfig = {}): Checker {
       redirect: 'manual',
       signal: AbortSignal.timeout(timeoutMs),
     });
-    if (res.status === 402) throw new Error('the free daily checks are used up — set PAYER_PRIVATE_KEY to pay per check');
+    if (res.status === 402) return null;
     if (!res.ok) throw new Error(`true402 answered HTTP ${res.status}`);
     return res.json();
   }
 
   return async (t: TradeTarget & { chain: Chain }) => {
     const path = t.chain === 'solana' ? '/v1/solana/token-safety' : `/v1/${t.chain}/token-report`;
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    const deadline = new Promise<never>((_, reject) => {
-      timer = setTimeout(() => reject(new Error(`no answer within ${timeoutMs} ms`)), timeoutMs);
-    });
-    try {
-      const body = await Promise.race([ask(path, t.token), deadline]);
-      return t.chain === 'solana' ? solanaVerdict(body as SolanaReport) : evmVerdict(body as EvmReport, t.chain);
-    } finally {
-      clearTimeout(timer);
-    }
+    const toVerdict = (body: unknown) => (t.chain === 'solana' ? solanaVerdict(body as SolanaReport) : evmVerdict(body as EvmReport, t.chain));
+    // The free request is abandoned at timeoutMs (fetch's own AbortSignal). A PAID check is never
+    // abandoned once it starts: walking away from it would mean paying for an answer nobody reads
+    // (ClawHub scan, 2026-10-20). payStall bounds it by itself (30 s probe, 120 s paid leg).
+    const body = await free(path, t.token);
+    if (body !== null) return toVerdict(body);
+    if (!cfg.payerPrivateKey) throw new Error('the free daily checks are used up — set PAYER_PRIVATE_KEY to pay per check');
+    return toVerdict(await payStall(path, { token: t.token }, { payerPrivateKey: cfg.payerPrivateKey, baseUrl, maxAmountUsd: cfg.maxAmountUsd }));
   };
 }
