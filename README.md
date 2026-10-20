@@ -5,8 +5,10 @@
 It hooks OpenClaw's `before_tool_call`, so it sits in front of *every* trading skill and MCP tool you have installed — Base trade skills, Uniswap, Jupiter, sniper bots, your own scripts. A skill the agent forgets to follow cannot skip it.
 
 ```bash
-openclaw plugins install @true402.dev/openclaw-swap-guard
+openclaw plugins install clawhub:@true402.dev/openclaw-swap-guard
 ```
+
+Published on [ClawHub](https://clawhub.ai) (security scan: clean) and npm; OpenClaw asks you to approve its tool-call hook on install.
 
 ## What it does
 
