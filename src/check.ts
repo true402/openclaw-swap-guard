@@ -5,7 +5,7 @@
 // → risk critical | high | medium | low. Without a payer key the call is a plain request, served by
 // true402's small daily free allowance; with one, payStall pays the exact quoted price over x402
 // (USDC on Base, never above the maxAmountUsd cap) whenever the free allowance is used up.
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { closeSync, mkdirSync, openSync, readFileSync, renameSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { payStall } from './x402.js';
@@ -34,7 +34,13 @@ export interface CheckConfig {
 export interface SpendStore {
   read(): { day: string; count: number };
   write(v: { day: string; count: number }): void;
+  /** Run read-compare-write as one step, also across processes (several OpenClaw gateways may share
+   *  one state directory). Throws if the lock cannot be had, so no payment is made. */
+  locked<T>(fn: () => T): T;
 }
+
+/** Busy-wait without burning CPU: the whole critical section is synchronous and microseconds long. */
+const pause = (ms: number) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 
 /** `$OPENCLAW_STATE_DIR` (or ~/.openclaw)/true402-swap-guard/spend.json. Unreadable = a fresh day. */
 export function fileSpendStore(path = join(process.env.OPENCLAW_STATE_DIR || join(homedir(), '.openclaw'), 'true402-swap-guard', 'spend.json')): SpendStore {
@@ -48,8 +54,35 @@ export function fileSpendStore(path = join(process.env.OPENCLAW_STATE_DIR || joi
       }
     },
     write(v) {
+      // Atomic: a crash mid-write leaves the old count, never a truncated file read as "a fresh day".
       mkdirSync(dirname(path), { recursive: true });
-      writeFileSync(path, JSON.stringify(v), { mode: 0o600 });
+      const tmp = `${path}.${process.pid}.tmp`;
+      writeFileSync(tmp, JSON.stringify(v), { mode: 0o600 });
+      renameSync(tmp, path);
+    },
+    locked(fn) {
+      // An O_EXCL lock file. Held only for a synchronous read-compare-write; one left by a crashed
+      // process is taken over after 10 s.
+      mkdirSync(dirname(path), { recursive: true });
+      const lock = `${path}.lock`;
+      for (let i = 0; ; i++) {
+        try {
+          closeSync(openSync(lock, 'wx', 0o600));
+          break;
+        } catch (e) {
+          if ((e as NodeJS.ErrnoException).code !== 'EEXIST') throw e;
+          try {
+            if (Date.now() - statSync(lock).mtimeMs > 10_000) unlinkSync(lock);
+          } catch { /* gone already */ }
+          if (i >= 200) throw new Error('spend-count lock busy');
+          pause(5);
+        }
+      }
+      try {
+        return fn();
+      } finally {
+        try { unlinkSync(lock); } catch { /* best effort */ }
+      }
     },
   };
 }
@@ -57,7 +90,7 @@ export function fileSpendStore(path = join(process.env.OPENCLAW_STATE_DIR || joi
 /** In-memory store, for tests. */
 export function memorySpendStore(): SpendStore {
   let v = { day: '', count: 0 };
-  return { read: () => v, write: (n) => { v = n; } };
+  return { read: () => v, write: (n) => { v = n; }, locked: (fn) => fn() };
 }
 
 /** Default per-check ceiling and daily count: together never more than $1.00 a day. */
@@ -147,14 +180,21 @@ export function createChecker(cfg: CheckConfig = {}): Checker {
     if (body !== null) return toVerdict(body);
     if (!cfg.payerPrivateKey) throw new Error('the free daily checks are used up — set TRUE402_PAYER_PRIVATE_KEY to pay per check');
     const today = new Date(now()).toISOString().slice(0, 10);
-    const saved = store.read();
-    const paidToday = saved.day === today ? saved.count : 0;
-    if (paidToday >= perDay) throw new Error(`the daily limit of ${perDay} paid checks is reached (maxPaidChecksPerDay)`);
+    let limitReached = false;
     try {
-      store.write({ day: today, count: paidToday + 1 });
+      store.locked(() => {
+        const saved = store.read();
+        const paidToday = saved.day === today ? saved.count : 0;
+        if (paidToday >= perDay) {
+          limitReached = true;
+          return;
+        }
+        store.write({ day: today, count: paidToday + 1 });
+      });
     } catch {
       throw new Error('could not record the paid-check count, so no payment was made');
     }
+    if (limitReached) throw new Error(`the daily limit of ${perDay} paid checks is reached (maxPaidChecksPerDay)`);
     return toVerdict(await payStall(path, { token: t.token }, { payerPrivateKey: cfg.payerPrivateKey, baseUrl, maxAmountUsd: perCheck }));
   };
 }

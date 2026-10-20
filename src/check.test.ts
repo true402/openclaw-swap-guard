@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { mkdtempSync } from 'node:fs';
+import { mkdtempSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createChecker, evmVerdict, solanaVerdict, fileSpendStore, memorySpendStore } from './check';
@@ -110,7 +110,37 @@ describe('the daily limit survives a restart (ClawHub scan of 1.0.2)', () => {
 
   it('if the count cannot be saved, no payment is made', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response('{}', { status: 402 })));
-    const broken = { read: () => ({ day: '', count: 0 }), write: () => { throw new Error('read-only disk'); } };
+    const broken = { read: () => ({ day: '', count: 0 }), write: () => { throw new Error('read-only disk'); }, locked: <T>(fn: () => T) => fn() };
     await expect(createChecker({ payerPrivateKey: '0x' + '11'.repeat(32), spendStore: broken })({ chain: 'base', token: ADDR })).rejects.toThrow(/no payment was made/);
   });
+});
+
+describe('the daily limit holds across PROCESSES (commit review of the Hermes port, 2026-10-20)', () => {
+  it('two processes sharing one state directory never exceed the limit together', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'guard-mp-'));
+    const path = join(dir, 'spend.json');
+    // Each child runs 20 locked increments against the same file, bounded at 25 in total.
+    const child = `
+      import { fileSpendStore } from ${JSON.stringify(join(__dirname, 'check.ts'))};
+      const s = fileSpendStore(${JSON.stringify(path)});
+      const pause = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+      // Start together, and hold each read-compare-write for 2 ms: without the lock, overlap is certain.
+      while (Date.now() < Number(process.env.START_AT)) pause(1);
+      let ok = 0;
+      for (let i = 0; i < 20; i++) s.locked(() => { const v = s.read(); pause(2); if (v.count < 25) { s.write({ day: 'd', count: v.count + 1 }); ok++; } });
+      console.log(ok);
+    `;
+    const startAt = String(Date.now() + 1500);
+    const run = () => new Promise<number>((resolve) => {
+      import('node:child_process').then(({ spawn }) => {
+        const p = spawn(process.execPath, ['--import', 'tsx', '--input-type=module', '-e', child], { cwd: join(__dirname, '..'), env: { ...process.env, START_AT: startAt } });
+        let out = '';
+        p.stdout.on('data', (d) => (out += d));
+        p.on('close', () => resolve(Number(out.trim())));
+      });
+    });
+    const [a, b] = await Promise.all([run(), run()]);
+    expect(a + b).toBe(25);
+    expect(JSON.parse(readFileSync(path, 'utf8')).count).toBe(25);
+  }, 30_000);
 });
