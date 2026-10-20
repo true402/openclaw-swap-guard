@@ -19,7 +19,7 @@ Before a tool call that buys a token, the guard asks [true402](https://true402.d
 
 - **Blocks** only on a definite danger verdict: an EVM token rated *avoid* (cannot be sold, extreme sell tax, liquidity just pulled…), or a Solana mint that can never be sold, can be seized, or is critical risk. The agent sees the reasons and is told not to retry with another tool.
 - **Lets the trade through** when the token checks out — and, by default, when it could not be checked at all (true402 unreachable, free checks used up, the address is a wallet rather than a token). A guard that breaks your trading whenever a third party hiccups is a guard you uninstall. Change that with `onUnchecked`.
-- Checks only the token being **bought**. The token you are selling is never checked: blocking the exit from a token whose liquidity is being pulled would trap you in it.
+- Never blocks a **sale**. The token you are selling is not checked, and when a command is ambiguous enough that a dangerous token *might* be the one being sold, the guard asks you instead of blocking — trapping you in a token whose liquidity is being pulled would be worse than the trade.
 - Skips majors and stablecoins (WETH, USDC, USDT, DAI, WBNB, SOL…), reuses a verdict for 10 minutes, and checks up to 5 distinct tokens per call — a call naming more is held for your approval (or blocked with `onUnchecked: block`). A token on a chain true402 does not serve counts as "could not be checked".
 
 It recognises buys in shell commands the way trading skills run them (`--token-out 0x…`, `trade <amount> <from> <to>`, `<script> <CA> --chain base`, `--chain solana <mint>`) and in structured tool parameters (`tokenOut`, `outputMint`, `token`, …). Command parsing fails closed: a token is checked on the default chain and on every chain the command names, and anything ambiguous — a `#`, `$'…'`, unbalanced quotes — means every address is checked, including the one being sold. A plain-English order that names no address (`"buy $20 of PEPE"`), or a token passed through a shell variable, cannot be checked.
@@ -46,7 +46,7 @@ All optional, under the plugin's config (`true402-swap-guard`):
 | `onCaution` | `allow` | `ask` = request your approval on a *caution* verdict |
 | `onUnchecked` | `allow` | `ask` or `block` when a token could not be checked |
 | `allowTokens` | `[]` | Token addresses never checked |
-| `timeoutMs` | `15000` | Give up on one check after this long (then it is "unchecked") |
+| `timeoutMs` | `15000` | Give up on a free check after this long (then it is "unchecked"). A paid check is never abandoned once paid — you get the answer you paid for |
 | `maxAmountUsd` | `0.25` | Never sign a single check payment above this |
 
 ## What is sent
